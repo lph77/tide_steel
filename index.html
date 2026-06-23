@@ -2221,6 +2221,7 @@ function render(){
     else if(SCREEN==="codex")h+=viewCodex();
     else if(SCREEN==="shipyard")h+=viewShipyard();
     else if(SCREEN==="map")h+=viewMap();
+    else if(SCREEN==="record")h+=viewRecord();
     else if(SCREEN==="end")h+=viewEnd();
   }
   if(TEMP.flash)h+=`<div class="panel" style="border-color:var(--gold)"><p class="gold">${TEMP.flash}</p></div>`;
@@ -2245,7 +2246,7 @@ function render(){
 function bar(cls,val,max,label){const pct=Math.max(0,Math.min(100,val/max*100));return `<div class="barwrap"><div class="barfill ${cls}" style="width:${pct}%"></div><div class="bartxt">${label||Math.round(val)+'/'+max}</div></div>`;}
 function viewBars(){
   const s=S;
-  return `<div class="clockbar mono"><span>🗓 ${dateStr(s)}</span><span><span class="lbl">Age</span> ${ageYears(s)}</span></div>
+  return `<div class="clockbar mono"><span>🗓 ${dateStr(s)}</span><span><span class="lbl">Age</span> ${ageYears(s)}</span><button data-act="record" style="margin-left:auto">Record</button><button class="danger" data-act="abandonRun">Quit</button></div>
   <div class="statbar mono">
     <span><span class="lbl">Lvl</span> ${s.level}</span>
     <span><span class="lbl">Gold</span> <span class="gold">${s.gold}</span></span>
@@ -2253,6 +2254,27 @@ function viewBars(){
     <span style="display:flex;align-items:center;gap:6px"><span class="lbl">Stam</span> ${bar("stam",s.stam,s.maxstam)}</span>
     <span><span class="lbl">STR</span> ${s.str} <span class="lbl">WIT</span> ${s.wit} <span class="lbl">LCK</span> ${s.luck}</span>
   </div>`;
+}
+function viewRecord(){
+  const s=S;
+  const title=generateTitle(s);
+  const legends=determineLegend(s);
+  const visited=Object.keys(s.visited).length;
+  const eco100=Object.values(s.eco).filter(e=>e>=100).length;
+  const deposit=s.deposit||0;
+  const loan=s.loan||0;
+  const netWorth=s.gold + deposit - loan;
+  return `<div class="panel"><h2>Voyage Record</h2>
+    <p class="quiet small">A glance at your current journey and achievements.</p>
+    <div class="chronicle"><div class="tag">Today</div><p class="narr small">${dateStr(s)}</p></div>
+    <div class="legendcard"><span class="small">Age ${ageYears(s)} · Days sailed ${s.day} · Gold ${s.gold.toLocaleString()}g · Deposit ${deposit.toLocaleString()}g · Loan ${loan.toLocaleString()}g · Net ${netWorth.toLocaleString()}g</span></div>
+    <div class="panel" style="padding:10px;margin:8px 0">
+      <p class="quiet small">Ports visited: <span class="teal">${visited}</span> · Chronicles: <span class="teal">${s.chronicles.length}</span> · Markets at 100%: <span class="teal">${eco100}</span> · Fights: <span class="teal">${s.fights}</span></p>
+      <p class="quiet small">Peak wealth: <span class="gold">${s.peakGold.toLocaleString()}g</span> · Fragments: <span class="teal">${s.fragments}</span> · Legends: <span class="teal">${legends.length}</span></p>
+    </div>
+    <div class="chronicle"><div class="tag">Title</div><p class="narr small">${title.full}</p><p class="quiet small">${title.summary}</p></div>
+    <div class="chronicle"><div class="tag">Achievements</div>${legends.map(l=>`<div class="legendcard"><span class="nm">${l}</span></div>`).join("")}</div>
+    <button class="primary full" data-act="backPort">Back to the port</button></div>`;
 }
 function viewBriefing(){
   const s=S;
@@ -2281,7 +2303,7 @@ function viewTitle(){
     <div class="divider">✦ ✦ ✦</div>
     ${TEMP.savedRun?`<div class="legendcard" style="border-color:var(--gold)">
       <span class="nm">Continue your voyage</span><br>
-      <span class="small quiet">${TEMP.savedRun.s.name} · ${ageYears(TEMP.savedRun.s)} years old · ${TEMP.savedRun.s.gold}g · at ${portById(TEMP.savedRun.s.port)?portById(TEMP.savedRun.s.port).name:'sea'}</span><br>
+      <span class="small quiet">${TEMP.savedRun.s.name} · ${ageYears(TEMP.savedRun.s)} years old · ${TEMP.savedRun.s.gold}g · ${dateStr(TEMP.savedRun.s)} · at ${portById(TEMP.savedRun.s.port)?portById(TEMP.savedRun.s.port).name:'sea'}</span><br>
       <button class="primary" data-act="continueGame">Resume this life</button>
       <button data-act="abandonRun">Abandon &amp; start anew</button>
     </div>`:`<button class="primary full" data-act="goCreate">Begin a New Life</button>`}
@@ -3134,6 +3156,7 @@ const ACTIONS={
   pickPerk:id=>{S.perks.push(id);TEMP.pendingPerk=false;const C=TEMP.combat;if(C){afterCombat(C);}else{SCREEN="port";render();}},
   toTitle:()=>{TEMP={savedRun:null};SCREEN="title";render();},
   continueGame:()=>{ const d=TEMP.savedRun; if(d&&d.s){ S=d.s; SCREEN=d.screen||"port"; S.tab=d.tab||S.tab||"market"; TEMP={}; render(); } },
+  record:()=>{ SCREEN="record"; render(); },
   abandonRun:()=>{ clearSave(); TEMP.savedRun=null; TEMP.bias=null; SCREEN="create"; render(); }
 };
 
