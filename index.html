@@ -85,7 +85,21 @@
 <div id="app"></div>
 <script>
 "use strict";
-const GAME_VERSION="v1.18";
+/* ---- STORAGE SHIM ----------------------------------------------------
+   The game persists via window.storage (get/set/delete). That object is
+   only injected by the Claude Artifacts sandbox; when the page is opened
+   directly in a browser or added to the iOS homescreen it is undefined,
+   so every save silently failed and the game reset on each refresh.
+   Fall back to localStorage, which persists across refreshes and iOS
+   standalone mode. Keep the same async {value} contract the code expects. */
+if(!window.storage){
+  window.storage = {
+    async get(k){ try{ const v=localStorage.getItem(k); return v===null?null:{value:v}; }catch(e){ return null; } },
+    async set(k,v){ try{ localStorage.setItem(k,v); }catch(e){} },
+    async delete(k){ try{ localStorage.removeItem(k); }catch(e){} }
+  };
+}
+const GAME_VERSION="v1.19";
 /* ===================================================================
    TIDE & STEEL  v2
    Data-driven. Expand by editing the arrays below.
@@ -318,32 +332,63 @@ const SHIPS = [
 ];
 
 /* ---------- SHIP UPGRADE TIERS ----------
-   Each ship is Mk I at purchase. Two refits (Mk II, Mk III) bought at the same shipyard.
-   Deltas LEAN INTO each ship's identity, so a maxed ship is the ultimate at its role.   */
+   Each ship is Mk I at purchase. Refits are bought at the same shipyard, Mk II upward.
+   Deltas LEAN INTO each ship's identity, so a maxed ship is the ultimate at its role.
+   Late tiers carry huge holds — the path to the million runs through cargo capacity.  */
 const SHIP_TIERS = {
-  skiff: [ // even the starter can be patched up a little
+  skiff: [ // even the starter can be patched up — and, with enough coin, far beyond
     {name:"The Splinter (Taped)",   cost:120, d:{cap:10, armor:1}},
-    {name:"The Splinter (Reinforced with Hope)", cost:260, d:{cap:14, armor:1, crew:0.10}}
+    {name:"The Splinter (Reinforced with Hope)", cost:260, d:{cap:14, armor:1, crew:0.10}},
+    {name:"The Splinter (Double-Hulled)", cost:520, d:{cap:22, armor:2}},
+    {name:"The Splinter (Outrigged)",     cost:1100, d:{cap:32, armor:2, crew:0.05}},
+    {name:"The Splinter (Bulk-Rigged)",   cost:2200, d:{cap:44, armor:3}},
+    {name:"The Splinter (Grand)",         cost:4200, d:{cap:60, armor:3, crew:0.05}},
+    {name:"The Splinter (Legend)",        cost:7800, d:{cap:80, armor:4, combat:1}}
   ],
-  dhow: [ // the Runner -> speed/evasion, with a useful hold bump
+  dhow: [ // the Runner -> speed/evasion, with an ever-growing hold
     {name:"The Greyhound",   cost:260, d:{evade:0.07, speed:0.10, crew:0.05, cap:16}},
-    {name:"The Ghost",       cost:520, d:{evade:0.09, speed:0.10, crew:0.08, cap:24}}
+    {name:"The Ghost",       cost:520, d:{evade:0.09, speed:0.10, crew:0.08, cap:24}},
+    {name:"The Phantom",     cost:1100, d:{evade:0.08, speed:0.08, cap:34, crew:0.05}},
+    {name:"The Will-o'-Wisp",cost:2200, d:{evade:0.06, speed:0.08, cap:46, crew:0.05}},
+    {name:"The Mirage",      cost:4200, d:{evade:0.05, speed:0.06, cap:60}},
+    {name:"The Vanishing",   cost:7800, d:{evade:0.05, speed:0.06, cap:78, crew:0.05}},
+    {name:"The Unseen",      cost:13500,d:{evade:0.05, speed:0.05, cap:100}}
   ],
-  corbita: [ // the Hauler -> BIG hold and armour
+  corbita: [ // the Hauler -> BIG hold and armour, then bigger
     {name:"The Fatter Lady",   cost:420, d:{cap:36, armor:4}},
-    {name:"The Immovable Object", cost:820, d:{cap:52, armor:5, crew:0.05}}
+    {name:"The Immovable Object", cost:820, d:{cap:52, armor:5, crew:0.05}},
+    {name:"The Leviathan",      cost:1700, d:{cap:72, armor:5}},
+    {name:"The Continent",      cost:3400, d:{cap:96, armor:6, crew:0.05}},
+    {name:"The Mountain Afloat",cost:6500, d:{cap:124, armor:7}},
+    {name:"The Tide-Swallower", cost:12000,d:{cap:156, armor:8, crew:0.05}},
+    {name:"The World-Hold",     cost:21000,d:{cap:194, armor:9}}
   ],
-  baghlah: [ // the All-Rounder -> a bit of everything, decent hold
+  baghlah: [ // the All-Rounder -> a bit of everything, scaling hold
     {name:"The Reliable Sort", cost:600, d:{cap:30, combat:2, armor:2, evade:0.04, crew:0.05}},
-    {name:"The Overachiever",  cost:1150,d:{cap:42, combat:3, armor:2, evade:0.04, speed:0.08, crew:0.05}}
+    {name:"The Overachiever",  cost:1150,d:{cap:42, combat:3, armor:2, evade:0.04, speed:0.08, crew:0.05}},
+    {name:"The Paragon",       cost:2300, d:{cap:58, combat:3, armor:3, evade:0.03, crew:0.05}},
+    {name:"The Polymath",      cost:4400, d:{cap:76, combat:4, armor:3, evade:0.03, speed:0.06}},
+    {name:"The Virtuoso",      cost:8000, d:{cap:98, combat:4, armor:4, crew:0.05}},
+    {name:"The Masterwork",    cost:14500,d:{cap:124, combat:5, armor:4, evade:0.03}},
+    {name:"The Apex",          cost:25000,d:{cap:154, combat:6, armor:5, crew:0.05}}
   ],
-  galley: [ // the Warship -> combat first, modest hold
+  galley: [ // the Warship -> combat first, with a growing hold to match
     {name:"The Worse Idea",   cost:850, d:{combat:5, crew:0.08, armor:2, cap:14}},
-    {name:"The Last Mistake", cost:1700,d:{combat:6, crew:0.10, armor:3, cap:20}}
+    {name:"The Last Mistake", cost:1700,d:{combat:6, crew:0.10, armor:3, cap:20}},
+    {name:"The Reckoning",    cost:3400, d:{combat:7, armor:3, cap:30}},
+    {name:"The Widowmaker",   cost:6500, d:{combat:8, armor:4, cap:42, crew:0.05}},
+    {name:"The Annihilator",  cost:12000,d:{combat:9, armor:4, cap:56}},
+    {name:"The Cataclysm",    cost:21000,d:{combat:11, armor:5, cap:72, crew:0.05}},
+    {name:"The Final Word",   cost:36000,d:{combat:13, armor:6, cap:90}}
   ],
-  junk: [ // the Fortress -> IMMENSE hold and armour
+  junk: [ // the Fortress -> IMMENSE hold and armour, then absurd
     {name:"The Floating Town",  cost:1400,d:{cap:52, armor:4, combat:2}},
-    {name:"The Floating City",  cost:2800,d:{cap:76, armor:5, combat:3, crew:0.05}}
+    {name:"The Floating City",  cost:2800,d:{cap:76, armor:5, combat:3, crew:0.05}},
+    {name:"The Floating Province", cost:5500, d:{cap:104, armor:6, combat:3}},
+    {name:"The Floating Kingdom",  cost:10500,d:{cap:136, armor:7, combat:4, crew:0.05}},
+    {name:"The Floating Empire",   cost:19000,d:{cap:172, armor:8, combat:4}},
+    {name:"The Floating Continent",cost:33000,d:{cap:212, armor:9, combat:5, crew:0.05}},
+    {name:"The Floating World",    cost:55000,d:{cap:256, armor:10, combat:6}}
   ]
 };
 /* effective stat = base + sum of purchased tier deltas (s.shipTier[id] = how many refits owned) */
@@ -784,6 +829,12 @@ const SPAR_STAM=30, LIBRARY_STAM=25, TEMPLE_STAM=20;
 /* once-per-day-per-activity gating: stored as s.didToday[activity]=dayNumber */
 function didToday(s,act){ return s.didToday && s.didToday[act]===s.day; }
 function markToday(s,act){ if(!s.didToday)s.didToday={}; s.didToday[act]=s.day; }
+
+/* exploring is once a day, but a port keeps rewarding economy boosts up to this many
+   successful explorations (its written discoveries run out sooner; later ones still pay) */
+const PORT_EXPLORE_MAX=5;
+function portExplores(s,id){ return (s.portExplores&&s.portExplores[id])||0; }
+function portExploreLeft(s,id){ return PORT_EXPLORE_MAX-portExplores(s,id); }
 
 /* real historical facts shown when reading in a library (educational, deduped per run) */
 const LIBRARY_FACTS = [
@@ -1679,10 +1730,9 @@ function explore(){
   if(injured(s)){flash("You're in no state to go exploring — "+injuryDaysLeft(s)+" day(s) of recovery left.");return;}
   if(didToday(s,"explore")){flash("You've wandered the city enough for one day.");return;}
   if(!canAct(COST.explore)){flash("Exploring needs "+COST.explore+" stamina. Rest first.");return;}
-  // present 3 random leads to choose from
-  const remaining=p.discoveries.map((d,i)=>i).filter(i=>!(s.foundDiscoveries[p.id]||[]).includes(i));
-  if(!remaining.length){
-    // nothing left to discover here — quick flavour, still costs the day
+  // a port keeps paying out (economy boosts) until you've worked it PORT_EXPLORE_MAX times
+  if(portExploreLeft(s,p.id)<=0){
+    // worked dry — quick flavour, still costs stamina & a block
     markToday(s,"explore"); spendStamina(s,COST.explore); advanceBlock(s);
     const newly=revealNeighbours(s,p.id);
     TEMP.discovery={text:"You've walked every street of "+p.name+".", reward:newly.length?("Still, you hear of a new port: "+newly.join(", ")+"."):"The city holds no more secrets for you."};
@@ -1721,6 +1771,7 @@ function pursueLead(idx){
     if(g>0){ s.gold+=g; s.peakGold=Math.max(s.peakGold,s.gold); reward="You come away "+g+" gold richer."; }
     if(great && cargoSpace(s)>0){ const gd=pick(p.sells); addCargo(s,gd,1); reward+=" And a fine "+GOODS[gd]+" besides!"; }
     bumpEco(s,2);
+    if(!s.portExplores)s.portExplores={}; s.portExplores[p.id]=(s.portExplores[p.id]||0)+1;  // counts toward this port's 5 economy-boosting explorations
     TEMP.discovery={text:(lead.win||"You succeed.")+(disc?" "+disc:""), reward, great};
     // fully explored?
     if((s.foundDiscoveries[p.id]||[]).length>=p.discoveries.length && !(s.fullyExplored&&s.fullyExplored[p.id])){
@@ -2325,7 +2376,7 @@ function viewCreate(){
 function portHeader(){
   const s=S,p=portById(s.port),rep=s.rep[p.id]||0,eco=s.eco[p.id]||0,sh=effShip(s);
   const col=portColor(p.id), mod=portModern(p.id);
-  const mkLabel = sh.maxMk>1 ? ` · Mk ${["I","II","III","IV"][sh.mk-1]}` : "";
+  const mkLabel = sh.maxMk>1 ? ` · Mk ${["I","II","III","IV","V","VI","VII","VIII","IX","X"][sh.mk-1]}` : "";
   return `<div class="panel" style="padding:12px;border-left:4px solid ${col}">
     <h2 style="margin-bottom:2px;color:${col}">${p.name}</h2>
     <p class="quiet small" style="margin:0 0 6px">${p.region}${mod?` · <span style="color:${col}">${mod}</span>`:''}</p>
@@ -2390,17 +2441,17 @@ function tabCity(){
   const g=a=>didToday(s,a);
   const hurt=injured(s);
   const sc=statStamCost(SPAR_STAM,s.str), lc=statStamCost(LIBRARY_STAM,s.wit), tc=statStamCost(TEMPLE_STAM,s.luck);
-  const strainNote = (s.strain||0)>=2 ? `<p class="red small" style="margin:4px 0">You're worn thin (strain ${s.strain}). Training while strained, hurt, or exhausted risks injury — rest a day to recover.</p>` : '';
+  const strainNote = (s.strain||0)>=2 ? `<p class="red small" style="margin:4px 0">Worn thin (strain ${s.strain}) — training now risks injury. Rest a day.</p>` : '';
   let h=`<div class="panel"><h2>The City</h2>
-    <p class="quiet small">Each pursuit can be done once per day. Sleep to renew the day.</p>`;
+    <p class="quiet small">One pursuit each per day. Sleep to renew.</p>`;
   if(hurt) h+=`<p class="red small" style="margin:4px 0">⛑ Injured — ${injuryDaysLeft(s)} day(s) of recovery left. No training, study, or prayer until healed.</p>`;
   h+=strainNote+`<div class="btnrow" style="flex-direction:column">
-      <button data-act="explore" ${(hurt||g("explore")||!canAct(COST.explore))?'disabled':''}>Explore the streets <span class="cost">${hurt?'(injured)':g("explore")?'(done today)':'('+COST.explore+' stam · choose a lead to chase)'}</span></button>
+      <button data-act="explore" ${(hurt||g("explore")||!canAct(COST.explore))?'disabled':''}>Explore the streets <span class="cost">${hurt?'(injured)':g("explore")?'(done today)':portExploreLeft(s,s.port)<=0?'('+COST.explore+' stam · fully worked)':'('+COST.explore+' stam · '+portExploreLeft(s,s.port)+' boosts left here)'}</span></button>
       <button data-act="library" ${(hurt||g("library")||s.wit>=SPAR_CAP||!canAct(lc))?'disabled':''}>Read at the library <span class="cost">${hurt?'(injured)':g("library")?'(done today)':s.wit>=SPAR_CAP?'(wit maxed)':'('+lc+' stam · '+((s.witProg||0))+'/'+statNeeded(s.wit)+' to +1 WIT)'}</span></button>
       <button data-act="spar" ${(hurt||g("spar")||s.str>=SPAR_CAP||!canAct(sc))?'disabled':''}>Spar at the yard <span class="cost">${hurt?'(injured)':g("spar")?'(done today)':s.str>=SPAR_CAP?'(str maxed)':'('+sc+' stam · '+((s.sparProg||0))+'/'+statNeeded(s.str)+' to +1 STR)'}</span></button>
       <button data-act="pray" ${(hurt||g("pray")||s.luck>=SPAR_CAP||!canAct(tc))?'disabled':''}>Pray at the temple <span class="cost">${hurt?'(injured)':g("pray")?'(done today)':s.luck>=SPAR_CAP?'(luck maxed)':'('+tc+' stam · '+((s.luckProg||0))+'/'+statNeeded(s.luck)+' to +1 LCK)'}</span></button>
     </div>
-    <p class="cost">STR → combat · WIT → better prices, haggling & discoveries · LCK → crits, escapes, fortune. Growth is slow and costs more as you improve.</p>`;
+    <p class="cost">STR → combat · WIT → prices &amp; discoveries · LCK → crits &amp; escapes.</p>`;
   // PORT INVESTMENT — pour gold into the local market to boost its economy toward the Lacuna goal
   const eco=s.eco[s.port]||0;
   const usedToday=(s.ecoInvestToday&&s.ecoInvestToday[s.port+":"+s.day])||0;
@@ -2685,12 +2736,12 @@ function viewIncident(){
   return `<div class="panel" style="border-left:4px solid var(--red)">
     <h2 style="color:var(--red)">Pushed Too Far</h2>
     <p class="narr">${I.text}. You'll need <span class="red">${I.days} day${I.days>1?'s':''}</span> of rest before you can train, study, or pray again.</p>
-    <p class="quiet small">Overtraining caught up with you. You can still trade, sail, and explore — but no self-improvement until you've healed. Rest by sleeping, or sail on; the days will pass.</p>
+    <p class="quiet small">Injured — no training, study, or prayer until you heal. You can still trade, sail, and explore. Rest by sleeping.</p>
     <button class="primary full" data-act="backCity">Grit your teeth</button></div>`;
 }
 function viewShipyard(){
   const s=S,p=portById(s.port),yardShip=SHIPS.find(x=>x.port===p.id),cur=effShip(s);
-  const roman=["I","II","III","IV"];
+  const roman=["I","II","III","IV","V","VI","VII","VIII","IX","X"];
   let h=`<div class="panel"><h2>Shipyard · ${p.name}</h2>
     <p class="quiet small">Your vessel: <span class="teal">${cur.tierName}</span>${cur.maxMk>1?` <span class="gold">Mk ${roman[cur.mk-1]}/${roman[cur.maxMk-1]}</span>`:''} — <em>${shipById(s.ship).identity}</em></p>
     <table><tr><th>Trait</th><th class="num">Now</th>${yardShip&&s.ship!==yardShip.id?`<th class="num">${yardShip.name}</th>`:''}</tr>`;
@@ -2844,7 +2895,7 @@ function viewLeads(){
   const statLabel={str:"STR",wit:"WIT",luck:"LCK",pay:"GOLD"};
   const statVal={str:s.str,wit:s.wit,luck:s.luck};
   let h=`<div class="panel"><h2>Explore ${p.name}</h2>
-    <p class="quiet small">Three leads catch your eye. Each tests a different strength — choose where to spend the day. Outcome depends on your stats and a little luck.</p>`;
+    <p class="quiet small">Three leads — each tests a different stat. Pick one.</p>`;
   TEMP.leads.forEach((lead,i)=>{
     let odds="";
     if(lead.stat!=="pay"){
