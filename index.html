@@ -99,7 +99,7 @@ if(!window.storage){
     async delete(k){ try{ localStorage.removeItem(k); }catch(e){} }
   };
 }
-const GAME_VERSION="v1.19";
+const GAME_VERSION="v1.20";
 /* ===================================================================
    TIDE & STEEL  v2
    Data-driven. Expand by editing the arrays below.
@@ -1831,21 +1831,15 @@ function payDebt(){
    THE BANKING HOUSE — borrow high, save low, default and pay the price.
    Educational: debt compounds fast; savings grow slowly; defaulting hurts.
    =================================================================== */
-/* Simple banking — flat rates; limits grow with each year you survive. */
+/* Simple banking — flat rates, no limits on borrowing or savings. */
 const LOAN_RATE=0.20;     // 20% per month, compounds
-const DEPOSIT_RATE=0.03;  // 3% per month
-function bankYears(s){ return Math.floor((s.day||0)/365)+1; }   // year of play, from 1
+const DEPOSIT_RATE=0.05;  // 5% per month
 function loanRate(s){ return LOAN_RATE; }
 function depositRate(s){ return DEPOSIT_RATE; }
-function loanCap(s){ return 10000*bankYears(s); }     // +10,000 lending per year
-function depositCap(s){ return 5000*bankYears(s); }   // +5,000 savings per year
 function monthIndex(s){ return Math.floor(s.day/30); }
 function borrow(amt){
   const s=S;
-  const cap=loanCap(s);
-  const room=cap-(s.loan||0);
-  if(room<=0){flash("The bank won't lend you more until you repay.");return;}
-  amt=Math.min(amt,room);
+  if(amt<=0)return;
   s.loan=(s.loan||0)+amt; s.gold+=amt;
   if(s.loanMonth===undefined) s.loanMonth=monthIndex(s);   // start the clock
   flash("Borrowed "+amt+" gold at "+Math.round(loanRate(s)*100)+"% monthly. Spend it well — interest never sleeps.");
@@ -1892,10 +1886,7 @@ function bankSeize(s){
 }
 function depositGold(amt){
   const s=S;
-  const cap=depositCap(s);
-  const room=cap-(s.deposit||0);
-  if(room<=0){flash("Your deposit is at the bank's cap of "+cap+" gold.");return;}
-  amt=Math.min(amt, room, s.gold);
+  amt=Math.min(amt, s.gold);
   if(amt<=0){flash("Nothing to deposit.");return;}
   s.gold-=amt; s.deposit=(s.deposit||0)+amt;
   flash("Deposited "+amt+" gold. It earns "+Math.round(depositRate(s)*100)+"% monthly, safe from robbery.");
@@ -1976,8 +1967,8 @@ function sellItem(id){
 /* monthly bank tick — called on sleep when the month rolls over.
    Returns a prompt object if a loan payment is due, else null. */
 function bankMonthly(s){
-  // deposit interest (capped, with a small overflow buffer)
-  if(s.deposit>0){ s.deposit=Math.min(depositCap(s)+500, Math.round(s.deposit*(1+depositRate(s)))); }
+  // deposit interest (uncapped)
+  if(s.deposit>0){ s.deposit=Math.round(s.deposit*(1+depositRate(s))); }
   if(!s.loan){ return null; }
   // loan compounds at your current (creditworthiness-based) rate
   const interest=Math.round(s.loan*loanRate(s));
@@ -2191,7 +2182,7 @@ function viewLacunaOpen(){
     <h2 style="color:var(--purple)">A Route Appears on No Map But Yours</h2>
     ${bossArt("lacuna")}
     <p class="narr">You have made the whole sea prosper — and in doing so, drawn out the one harbour that hides from prosperity. As you sleep, a chart you did not draw appears in your cabin, inked in a hand like your father's. At its edge, a single black bay: <span class="purple">the Lacuna</span>.</p>
-    <p class="narr small">There the debt of <span class="red">${S.lacunaDebt.toLocaleString()}g</span> must be settled — paid in gold, or in blood. Sail there from the Rest &amp; Sail tab when you are ready. This is the end of your tale, one way or another.</p>
+    <p class="narr small">There the debt of <span class="red">${S.lacunaDebt.toLocaleString()}g</span> must be settled — paid in gold, or in blood. Sail there from the Sail tab when you are ready. This is the end of your tale, one way or another.</p>
     <button class="primary full" data-act="backPort">I understand</button></div>`;
 }
 function viewLacuna(){
@@ -2263,6 +2254,7 @@ function render(){
     else if(SCREEN==="worldevent")h+=viewWorldEvent();
     else if(SCREEN==="worldnews")h+=viewWorldNews();
     else if(SCREEN==="bank")h+=viewBank();
+    else if(SCREEN==="invest")h+=viewInvest();
     else if(SCREEN==="shop")h+=viewShop();
     else if(SCREEN==="bankdue")h+=viewBankDue();
     else if(SCREEN==="seize")h+=viewSeize();
@@ -2443,7 +2435,8 @@ function tabCity(){
   const sc=statStamCost(SPAR_STAM,s.str), lc=statStamCost(LIBRARY_STAM,s.wit), tc=statStamCost(TEMPLE_STAM,s.luck);
   const strainNote = (s.strain||0)>=2 ? `<p class="red small" style="margin:4px 0">Worn thin (strain ${s.strain}) — training now risks injury. Rest a day.</p>` : '';
   let h=`<div class="panel"><h2>The City</h2>
-    <p class="quiet small">One pursuit each per day. Sleep to renew.</p>`;
+    <p class="quiet small">One pursuit each per day. Sleep to renew.</p>
+    <button class="full primary" data-act="sleep">Sleep until morning <span class="cost">(renews the day · restores stamina · prices shift)</span></button>`;
   if(hurt) h+=`<p class="red small" style="margin:4px 0">⛑ Injured — ${injuryDaysLeft(s)} day(s) of recovery left. No training, study, or prayer until healed.</p>`;
   h+=strainNote+`<div class="btnrow" style="flex-direction:column">
       <button data-act="explore" ${(hurt||g("explore")||!canAct(COST.explore))?'disabled':''}>Explore the streets <span class="cost">${hurt?'(injured)':g("explore")?'(done today)':portExploreLeft(s,s.port)<=0?'('+COST.explore+' stam · fully worked)':'('+COST.explore+' stam · '+portExploreLeft(s,s.port)+' boosts left here)'}</span></button>
@@ -2452,22 +2445,28 @@ function tabCity(){
       <button data-act="pray" ${(hurt||g("pray")||s.luck>=SPAR_CAP||!canAct(tc))?'disabled':''}>Pray at the temple <span class="cost">${hurt?'(injured)':g("pray")?'(done today)':s.luck>=SPAR_CAP?'(luck maxed)':'('+tc+' stam · '+((s.luckProg||0))+'/'+statNeeded(s.luck)+' to +1 LCK)'}</span></button>
     </div>
     <p class="cost">STR → combat · WIT → prices &amp; discoveries · LCK → crits &amp; escapes.</p>`;
-  // PORT INVESTMENT — pour gold into the local market to boost its economy toward the Lacuna goal
+  // PORT INVESTMENT — a single option; the explanation lives on the invest screen
+  const eco=s.eco[s.port]||0;
+  h+=`<div class="panel"><button class="full" data-act="openInvest">Invest in market economy ${eco>=100?'<span class="green small">✓ at peak</span>':`<span class="quiet small">— ${p.name} at ${eco}%</span>`}</button></div>`;
+  h+=`<div class="panel"><div class="btnrow">
+      <button data-act="mapView">🗺 World Map</button>
+      <button data-act="codex">Codex</button>
+    </div></div>`;
+  return h;
+}
+function viewInvest(){
+  const s=S,p=portById(s.port);
   const eco=s.eco[s.port]||0;
   const usedToday=(s.ecoInvestToday&&s.ecoInvestToday[s.port+":"+s.day])||0;
   const roomToday=Math.max(0,INVEST_DAILY_CAP-usedToday);
-  h+=`<div class="panel"><h3 style="margin:0 0 6px">Invest in ${p.name}'s Market <span class="quiet small">— economy ${eco}%</span></h3>
-    <p class="quiet small">Put coin into the docks, warehouses and guilds to grow this market: <span class="teal">1,000g = +1%</span>. ${eco>=100?'<span class="green">This market is at its peak.</span>':`Up to +${roomToday}% more today.`}</p>`;
+  let h=`<div class="panel"><h2>Invest in ${p.name}'s Market <span class="quiet small">— economy ${eco}%</span></h2>
+    <p class="quiet small">Pour gold into the docks, warehouses and guilds to grow this market: <span class="teal">1,000g = +1%</span>. A richer market trades better goods at better prices — and bringing every market to ${LACUNA_ECO_TARGET}% reveals the hidden Lacuna, where your father's debt awaits. ${eco>=100?'<span class="green">This market is at its peak.</span>':`Up to +${roomToday}% more today.`}</p>`;
   if(eco<100 && roomToday>0){
     h+=`<div class="btnrow">
       ${[[1,1000],[5,5000],[10,10000]].map(([pct,cost])=>`<button data-act="investEco" data-arg="${cost}" ${(s.gold<cost||roomToday<pct)?'disabled':''}>+${pct}% (${cost.toLocaleString()}g)</button>`).join('')}
     </div>`;
   } else if(eco<100){ h+=`<p class="cost">You've invested all you can here today — return another day.</p>`; }
-  h+=`<p class="cost">Bring every market to ${LACUNA_ECO_TARGET}% to reveal the hidden Lacuna, where your father's debt awaits.</p></div>`;
-  h+=`<div class="panel"><div class="btnrow">
-      <button data-act="mapView">🗺 World Map</button>
-      <button data-act="codex">Codex</button>
-    </div></div>`;
+  h+=`<button class="full" data-act="backPort">Back to the city</button></div>`;
   return h;
 }
 function tabHarbour(){
@@ -2490,8 +2489,7 @@ function tabHarbour(){
 function tabSail(){
   const s=S;
   const prog=ecoProgress(s);
-  let h=`<div class="panel"><h2>Rest &amp; Sail</h2>
-    <button class="full primary" data-act="sleep">Sleep until morning <span class="cost">(renews the day · restores stamina · prices shift)</span></button>`;
+  let h=`<div class="panel"><h2>Sail</h2>`;
   // THE MISSION — always visible, so the player knows the goal
   if(s.lacunaUnlocked){
     h+=`<div class="legendcard" style="border-color:var(--purple)">
@@ -2576,13 +2574,13 @@ function viewLibrary(){
 function viewBank(){
   const s=S,p=portById(s.port);
   const loan=s.loan||0, dep=s.deposit||0;
-  const lr=loanRate(s), dr=depositRate(s), lcap=loanCap(s), dcap=depositCap(s);
+  const lr=loanRate(s), dr=depositRate(s);
   const monthlyInt=Math.round(loan*lr);
   let h=`<div class="panel"><h2>Banking House · ${p.name}</h2>
     <p class="quiet small">Banking houses — from the Knights Templar to the merchant banks of Florence to the <em>hawala</em> brokers of the Indian Ocean — financed the trade that built the world. They also knew the iron law of interest.</p>
     <div class="legendcard">
       <span class="small">Your purse: <span class="gold">${s.gold}g</span></span><br>
-      <span class="small">On deposit: <span class="teal">${dep}g</span> / ${dcap} cap · earns <span class="green">${Math.round(dr*100)}%</span>/month</span><br>
+      <span class="small">On deposit: <span class="teal">${dep}g</span> · earns <span class="green">${Math.round(dr*100)}%</span>/month</span><br>
       <span class="small">Loan owed: <span class="${loan?'red':'quiet'}">${loan}g</span>${loan?` · grows <span class="red">${Math.round(lr*100)}%</span>/month (~${monthlyInt}g)`:''}</span>
       ${s.inDefault?`<br><span class="red small">⚠ In default — collectors hunt you at every port until you repay.</span>`:''}
     </div>`;
@@ -2593,7 +2591,7 @@ function viewBank(){
     const lines={
       borrow:`Borrow <span class="gold">${C.amt}g</span> at ${Math.round(lr*100)}%/month. Your debt will grow until repaid.`,
       repay:`Repay <span class="gold">${Math.min(C.amt,loan,s.gold)}g</span> toward your ${loan}g loan.`,
-      deposit:`Deposit <span class="gold">${Math.min(C.amt,s.gold,dcap-dep)}g</span> into savings (earns ${Math.round(dr*100)}%/month, safe from robbery).`,
+      deposit:`Deposit <span class="gold">${Math.min(C.amt,s.gold)}g</span> into savings (earns ${Math.round(dr*100)}%/month, safe from robbery).`,
       withdraw:`Withdraw <span class="gold">${Math.min(C.amt,dep)}g</span> from your deposit back into your purse.`
     };
     h+=`<div class="panel" style="border:2px solid var(--gold)">
@@ -2609,9 +2607,9 @@ function viewBank(){
   // Borrow
   h+=`<div class="panel"><h3 style="margin:0 0 6px">Borrow <span class="quiet small">— ${Math.round(lr*100)}%/month, compounds</span></h3>
     <div class="btnrow">
-      ${[1000,2500,5000].map(a=>`<button data-act="bankAsk" data-arg="borrow:${a}" ${(loan>=lcap)?'disabled':''}>Borrow ${a}g</button>`).join('')}
+      ${[1000,5000,10000].map(a=>`<button data-act="bankAsk" data-arg="borrow:${a}">Borrow ${a}g</button>`).join('')}
     </div>
-    <p class="cost">The bank lends up to <span class="gold">${lcap}g</span> at ${Math.round(lr*100)}%/month (your limit rises each year you trade). An unpaid debt doubles in roughly ${Math.ceil(Math.log(2)/Math.log(1+lr))} months.</p></div>`;
+    <p class="cost">The bank lends without limit at ${Math.round(lr*100)}%/month. An unpaid debt doubles in roughly ${Math.ceil(Math.log(2)/Math.log(1+lr))} months.</p></div>`;
   // Repay
   if(loan>0){
     h+=`<div class="panel"><h3 style="margin:0 0 6px">Repay</h3>
@@ -2623,9 +2621,9 @@ function viewBank(){
       <p class="cost">Paying only the interest keeps you in debt forever — the principal never shrinks.</p></div>`;
   }
   // Deposit / withdraw
-  h+=`<div class="panel"><h3 style="margin:0 0 6px">Savings <span class="quiet small">— ${Math.round(dr*100)}%/month, safe from robbery, cap ${dcap}g</span></h3>
+  h+=`<div class="panel"><h3 style="margin:0 0 6px">Savings <span class="quiet small">— ${Math.round(dr*100)}%/month, safe from robbery</span></h3>
     <div class="btnrow">
-      ${[500,1000,2500].map(a=>`<button data-act="bankAsk" data-arg="deposit:${a}" ${(s.gold<a||(dep>=dcap))?'disabled':''}>Deposit ${a}g</button>`).join('')}
+      ${[1000,5000,10000].map(a=>`<button data-act="bankAsk" data-arg="deposit:${a}" ${(s.gold<a)?'disabled':''}>Deposit ${a}g</button>`).join('')}
     </div>
     ${dep>0?`<div class="btnrow" style="margin-top:6px">
       <button data-act="bankAsk" data-arg="withdraw:${Math.min(500,dep)}">Withdraw ${Math.min(500,dep)}g</button>
@@ -3170,6 +3168,7 @@ const ACTIONS={
   spar:()=>trainSpar(), pray:()=>prayTemple(),
   fund:()=>fundCity(), payDebt:()=>payDebt(),
   openBank:()=>{TEMP.bankConfirm=null;SCREEN="bank";render();},
+  openInvest:()=>{SCREEN="invest";render();},
   openShop:()=>{SCREEN="shop";render();},
   buyItem:id=>buyItem(id), sellItem:id=>sellItem(id), buyPrestige:()=>buyPrestige(),
   borrow:a=>borrow(+a), repayLoan:a=>repayLoan(+a), depositGold:a=>depositGold(+a), withdrawGold:a=>withdrawGold(+a),
